@@ -1,0 +1,26 @@
+# Ignore everything
+*
+
+# Allow specific files
+!app.py
+!requirements.txt
+!xgboost-model.pkl
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore virtual environment
+venv/
+env/
+.env/
+
+# Ignore git directory
+.git/
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore data files that might be in the directory
+*.csv
