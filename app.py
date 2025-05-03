@@ -2,22 +2,56 @@
 # -*- coding: utf-8 -*-
 
 """
-Gradio application for heart failure patient survival prediction
+Gradio application for heart failure patient survival prediction with Prometheus metrics
 """
 
 import gradio as gr
 import joblib
 import pandas as pd
 import os
+from prometheus_client import Counter, Histogram, start_http_server, make_asgi_app
+from prometheus_client import Info, Gauge
+import time
+from functools import wraps
 
 MODEL_PATH = "xgboost-model.pkl"
+
+# Define Prometheus metrics
+PREDICTION_COUNT = Counter('heart_failure_predictions_total', 'Total number of predictions made')
+PREDICTION_LATENCY = Histogram('heart_failure_prediction_latency_seconds', 'Time spent processing prediction requests')
+DEATH_EVENT_PREDICTIONS = Counter('death_event_predictions', 'Number of death event predictions')
+SURVIVAL_PREDICTIONS = Counter('survival_predictions', 'Number of survival predictions')
+MODEL_VERSION = Info('model_version', 'Version of the currently loaded model')
+DEATH_PROBABILITY_GAUGE = Gauge('last_prediction_death_probability', 'Probability of death event for the last prediction')
+
+# Track additional input metrics
+AGE_INPUT = Histogram('patient_age', 'Age of patients for prediction', buckets=[20, 30, 40, 50, 60, 70, 80, 90, 100])
+EJECTION_FRACTION_INPUT = Histogram('patient_ejection_fraction', 'Ejection fraction of patients', buckets=[10, 20, 30, 40, 50, 60, 70, 80])
+
+def timing_metrics(metric):
+    """Decorator to measure function execution time"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            result = func(*args, **kwargs)
+            elapsed_time = time.time() - start_time
+            metric.observe(elapsed_time)
+            return result
+        return wrapper
+    return decorator
 
 def load_model(model_path=MODEL_PATH):
     """Load the trained model from file"""
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file '{model_path}' not found. Please run train_model.py first.")
-    return joblib.load(model_path)
+    model = joblib.load(model_path)
+    
+    # Set model version info
+    MODEL_VERSION.info({'path': model_path, 'file_size': str(os.path.getsize(model_path))})
+    return model
 
+@timing_metrics(PREDICTION_LATENCY)
 def predict_death_event(features, model):
     """
     Predict the probability of death event based on patient features
@@ -45,6 +79,15 @@ def predict_death_event(features, model):
 
     # Get probability of positive class (1)
     probability = model.predict_proba(features)[0][1]
+
+    # Update metrics
+    PREDICTION_COUNT.inc()
+    if prediction == 1:
+        DEATH_EVENT_PREDICTIONS.inc()
+    else:
+        SURVIVAL_PREDICTIONS.inc()
+    
+    DEATH_PROBABILITY_GAUGE.set(probability)
 
     return prediction, probability
 
@@ -80,6 +123,10 @@ def gradio_wrapper(age, anaemia, creatinine_phosphokinase, diabetes, ejection_fr
     # Format results for Gradio outputs
     result = "Death Event" if prediction == 1 else "Survival"
     prob_percentage = float(probability * 100)
+
+    # Record some additional metrics for monitoring
+    AGE_INPUT.observe(age)
+    EJECTION_FRACTION_INPUT.observe(ejection_fraction)
 
     return result, prob_percentage
 
@@ -124,8 +171,17 @@ def main():
         print(f"Model file '{MODEL_PATH}' not found. Please run train_model.py first.")
         return
     
+    # Start Prometheus metrics server on separate port
+    print(f"Starting Prometheus metrics server on port 8000...")
+    start_http_server(8000)
+    
     # Create and launch interface
     iface = create_interface()
+    
+    # Get the underlying FastAPI app and mount metrics
+    app = iface.app
+    app.mount("/metrics", make_asgi_app())
+    
     iface.launch(server_name="0.0.0.0", server_port=8001)
 
 if __name__ == "__main__":

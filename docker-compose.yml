@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  survival_prediction:
+    build: .
+    container_name: survival_prediction
+    ports:
+      - "8000:8000"  # Prometheus metrics
+      - "8001:8001"  # Gradio interface
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./Prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./Prometheus/prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge

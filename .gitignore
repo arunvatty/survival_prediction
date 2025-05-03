@@ -76,6 +76,10 @@ Thumbs.db
 # Gradio generated files
 flagged/
 
+# Data folders
+Grafana/grafana-data/
+Prometheus/prometheus-data/
+
 # Docker
 #.docker/
 #.dockerignore
